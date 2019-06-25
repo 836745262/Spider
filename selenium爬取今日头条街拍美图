@@ -1,0 +1,97 @@
+from selenium import webdriver
+from selenium.common.exceptions import NoSuchElementException,TimeoutException
+import time
+import requests
+from requests.exceptions import RequestException
+import os
+from hashlib import md5
+from multiprocessing import Pool
+import pymongo
+os.chdir('/Users/brianlee/desktop/')
+client = pymongo.MongoClient(host='localhost',port=27017)
+db = client.toutiao
+collection = db.jiepai
+
+
+def get_page_index(url):
+    page_list = []
+    browser = webdriver.Chrome()
+    browser.get(url)
+    time.sleep(3)
+    for i in range(20):
+        browser.execute_script('window.scrollTo(0, document.body.scrollHeight)')
+        browser.execute_script("var q=document.documentElement.scrollTop=1000")
+        time.sleep(3)
+    pages = browser.find_elements_by_css_selector('a.link.title')
+    for page in pages:
+        page_list.append(page.get_attribute('href'))
+    return page_list
+
+
+def get_page_detail(link):
+    pics = []
+    browser = webdriver.Chrome()
+    browser.get(link)
+    title_tag = browser.find_element_by_css_selector('h1')
+    title = title_tag.text
+    pics_link = browser.find_elements_by_css_selector('div.pgc-img img')
+    for pic in pics_link:
+        pics.append(pic.get_attribute('src'))
+    # print(title,pics)
+    return title, pics
+
+
+def download_img(pic_link):
+    response = requests.get(pic_link)
+    return response.content
+
+
+def save_img(byte,title):
+    if not os.path.exists(title):
+        os.mkdir(title)
+    file_path = '{0}/{1}.{2}'.format(title, md5(byte).hexdigest(), 'jpg')
+    if not os.path.exists(file_path):
+        with open(file_path, 'wb') as f:
+            f.write(byte)
+
+
+def save_to_mongo(data):
+    if collection.insert_one(data):
+        print('Successfully Saved to Mongo', data)
+        return True
+    return False
+
+
+def main(url):
+
+    page_list = get_page_index(url)
+    for link in page_list:
+        title, pics = get_page_detail(link)
+        print(title)
+
+        for pic in pics:
+            photo = download_img(pic)
+            # save_img(photo,title)
+        save_to_mongo({
+                'url':url,
+                'picture':pics,
+                'title':title
+            })
+
+
+if __name__ == '__main__':
+    url = 'https://www.toutiao.com/c/user/70055749023/#mid=1579300705089550'
+    pool = Pool()
+    try:
+        # pool.map(main,url)
+        main(url)
+    except NoSuchElementException:
+        print('No element')
+    except TimeoutException:
+        print('Time out')
+    except RequestException:
+        print('request failed')
+    except Exception as result:
+        print(result)
+    finally:
+        pool.close()
